@@ -25,6 +25,7 @@
     "use_peft": true,
     "lora_r": 64,
     "lora_alpha": 16,
+    "use_rslora": true,
     "load_in_8bit": true,
     "max_seq_length": 1024
 }
