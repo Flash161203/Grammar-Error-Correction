@@ -1,7 +1,9 @@
-transformers==git+https://github.com/huggingface/transformers
+transformers @ git+https://github.com/huggingface/transformers
 datasets==2.18.0
 evaluate==0.4.1
 accelerate==0.28.0
 peft==0.10.0
 scikit-learn==1.4.1.post1
 bitsandbytes==0.43.0
+trl==0.8.1
+flash-attn==2.5.6

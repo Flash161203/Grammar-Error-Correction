@@ -31,7 +31,7 @@ import torch
 from datasets import load_dataset
 
 from tqdm.rich import tqdm
-from transformers import AutoTokenizer, TrainingArguments
+from transformers import AutoTokenizer, TrainingArguments, AutoModelForCausalLM
 
 from trl import (
     ModelConfig,
@@ -81,10 +81,13 @@ if __name__ == "__main__":
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
     )
+    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, use_fast=True
     )
-    tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        model.resize_token_embeddings(len(tokenizer))
 
     ################
     # Dataset
@@ -124,7 +127,7 @@ if __name__ == "__main__":
 
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["validation"]
-    response_template = "\n### Response:\n"
+    response_template = "### Response:\n"
     collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
     ################
     # Optional rich context managers
@@ -145,10 +148,15 @@ if __name__ == "__main__":
     ################
     # Training
     ################
+    import wandb
+    os.environ["WANDB_LOG_MODEL"] = "end"
+    run = wandb.init(entity="ay2324s2-cs4248-team-47", project="finetune-pretrained-transformer")
+    peft_config = get_peft_config(model_config)
+    peft_config.use_rslora = True
+    
     with init_context:
         trainer = SFTTrainer(
-            model=model_config.model_name_or_path,
-            model_init_kwargs=model_kwargs,
+            model=model,
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
@@ -156,7 +164,7 @@ if __name__ == "__main__":
             data_collator=collator,
             max_seq_length=args.max_seq_length,
             tokenizer=tokenizer,
-            peft_config=get_peft_config(model_config),
+            peft_config=peft_config,
             callbacks=[RichProgressCallback] if TRL_USE_RICH else None,
         )
 
@@ -164,3 +172,4 @@ if __name__ == "__main__":
 
     with save_context:
         trainer.save_model(training_args.output_dir)
+    wandb.finish()
