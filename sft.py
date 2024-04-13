@@ -19,6 +19,7 @@ from contextlib import nullcontext
 TRL_USE_RICH = os.environ.get("TRL_USE_RICH", False)
 import sys
 from trl.commands.cli_utils import init_zero_verbose, SftScriptArguments, TrlParser
+from preprocessing_functions import get_raw_splits, apply_prompt_template
 
 if TRL_USE_RICH:
     init_zero_verbose()
@@ -28,7 +29,6 @@ if TRL_USE_RICH:
     from rich.logging import RichHandler
 
 import torch
-from datasets import load_dataset
 
 from tqdm.rich import tqdm
 from transformers import AutoTokenizer, TrainingArguments, AutoModelForCausalLM
@@ -86,44 +86,14 @@ if __name__ == "__main__":
         model_config.model_name_or_path, use_fast=True
     )
     if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        tokenizer.add_special_tokens({'pad_token': '[PAD]', 'unk_token': '[UNK]'})
         model.resize_token_embeddings(len(tokenizer))
 
     ################
     # Dataset
     ################
-    import random
-
-    def formatting_prompts_func(examples):
-        # format dataset following https://github.com/huggingface/trl/pull/444#issue-1760952763
-        # prompt from https://huggingface.co/datasets/HuggingFaceH4/instruction-dataset/viewer/default/test?q=correct&row=77
-        INSTRUCTION = "Rewrite the given text and correct grammar, spelling, and punctuation errors."
-        output_texts = []
-        for i in range(len(examples["text"])):
-            edits = examples["edits"][i]
-            original_text = examples["text"][i]
-            corrected_text = examples["text"][i]
-            for start, end, correction in reversed(
-                list(
-                    zip(
-                        edits["start"],
-                        edits["end"],
-                        edits["text"],
-                    )
-                )
-            ):
-                if correction == None:
-                    correction = tokenizer.unk_token  # what to do with None?
-                corrected_text = (
-                    corrected_text[:start] + correction + corrected_text[end:]
-                )
-
-            text = f"### Instruction:\n{INSTRUCTION}\n### Input:\n{original_text}\n### Response:\n{corrected_text}"
-
-            output_texts.append(text)
-        return output_texts
-
-    raw_datasets = load_dataset(args.dataset_name, args.config)
+    formatting_prompts_func = apply_prompt_template
+    raw_datasets = get_raw_splits()
 
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["validation"]
