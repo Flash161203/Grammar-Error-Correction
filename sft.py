@@ -92,9 +92,8 @@ if __name__ == "__main__":
     ################
     # Dataset
     ################
-    formatting_prompts_func = apply_prompt_template
     raw_datasets = get_raw_splits()
-
+    raw_datasets = raw_datasets.map(apply_prompt_template, fn_kwargs={"tokenizer": tokenizer}, batched=True)
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["validation"]
     response_template = "### Response:\n"
@@ -119,6 +118,7 @@ if __name__ == "__main__":
     # Training
     ################
     import wandb
+    # os.environ["WANDB_MODE"] = "disabled"
     os.environ["WANDB_LOG_MODEL"] = "end"
     run = wandb.init(entity="ay2324s2-cs4248-team-47", project="finetune-pretrained-transformer")
     peft_config = get_peft_config(model_config)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            formatting_func=formatting_prompts_func,
+            dataset_text_field="text",
             data_collator=collator,
             max_seq_length=args.max_seq_length,
             tokenizer=tokenizer,
@@ -142,4 +142,5 @@ if __name__ == "__main__":
 
     with save_context:
         trainer.save_model(training_args.output_dir)
+        tokenizer.save_pretrained(training_args.output_dir)
     wandb.finish()

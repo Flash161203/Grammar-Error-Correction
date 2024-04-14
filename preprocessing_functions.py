@@ -38,7 +38,7 @@ def apply_prompt_template(examples, tokenizer) -> dict[str, list[str]]:
         prompt = (
             f'### Instruction:\n'
             f'{INSTRUCTION}\n'
-            f'### Input:\n{original_text}{tokenizer.eos_token}\n'
+            f'### Input:\n{original_text}\n'
             '### Response:\n'
             f'{corrected_text}{tokenizer.eos_token}'
         )
