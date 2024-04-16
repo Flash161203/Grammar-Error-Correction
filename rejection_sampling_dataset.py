@@ -49,7 +49,7 @@ def tournament_ranking(responses: List[str], rewards: List[float]):
         chosen: chosen samples.
         rejected: rejected samples.
     """
-    sorted_responses = [response for _, response in sorted(zip(rewards, responses), reverse=True)]
+    sorted_responses = [response for _, response in sorted(zip(rewards, responses))]
 
     chosen = [sorted_responses[i] for i in range(0, len(responses), 2)]
     rejected =[sorted_responses[i] for i in range(1, len(responses), 2)]
