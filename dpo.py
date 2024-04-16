@@ -82,7 +82,7 @@ if __name__ == "__main__":
     )
     
     peft_config = PeftConfig.from_pretrained(model_config.model_name_or_path)
-    model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path, load_in_8bit=True, attn_implementation="flash_attention_2")
+    model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path, **model_kwargs) 
     
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, use_fast=True
@@ -153,20 +153,20 @@ if __name__ == "__main__":
         load_from_cache_file=False,
 
     )
-
+    ds = ds["train"].train_test_split(test_size=0.1, seed=0)
     train_dataset = ds["train"]
     eval_dataset = ds["test"]
-
+    print(train_dataset, eval_dataset)
     ###############
     # Training
     ###############
     os.environ["WANDB_MODE"] = "offline"
+    os.environ["WANDB_LOG_MODEL"] = "end"
     os.environ["WANDB_ENTITY"] = "ay2324s2-cs4248-team-47"
     os.environ["WANDB_PROJECT"] = "dpo"
     with init_context:
         trainer = DPOTrainer(
             model,
-            loss_type="hinge", # Remove if this is not rejection sampling dataset
             args=training_args,
             beta=args.beta,
             train_dataset=train_dataset,
