@@ -1,14 +1,14 @@
 import torch
 from datasets import load_dataset, DatasetDict
 from transformers import (
-    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
     AutoTokenizer,
     pipeline,
 )
+from peft import PeftModel, PeftConfig
 import json
 from huggingface_hub import login
 from evaluate import load
-
 
 def login_to_hf_hub():
     login(token="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")
@@ -22,24 +22,35 @@ def process_split(dataset_name, dataset_config) -> DatasetDict:
     return raw_datasets
 
 
-def preprocess_baseline_transformer(dataset):
+def get_prompt(text, tokenizer):
+    INSTRUCTION = "Rewrite the given text and correct grammar, spelling, and punctuation errors."
+    prompt = f"### Instruction:\n{INSTRUCTION}\n### Input:\n{text}\n### Response:\n"
+    return prompt
+
+def preprocess_pretrained_model(examples):
     model_checkpoint = "google/flan-t5-large"
     tokenizer = AutoTokenizer.from_pretrained(
-        model_checkpoint,
-    )
-    inputs = dataset["text"]
+        model_checkpoint, eos_token=""
+    ) 
+    inputs = examples['text']
     model_inputs = tokenizer(
-        inputs, max_length=512, truncation=True, return_offsets_mapping=True
+        inputs,
+        max_length=512,
+        truncation=True,
+        return_offsets_mapping=True
     )
-
+    
     labels_out = []
     offset_mapping = model_inputs.pop("offset_mapping")
     for i in range(len(model_inputs["input_ids"])):
-        dataset_idx = i
+        example_idx = i
+
         start_idx = offset_mapping[i][0][0]
         end_idx = offset_mapping[i][-2][1]
-        edits = dataset["edits"][dataset_idx]
-        corrected_text = inputs[dataset_idx][start_idx:end_idx]
+
+        edits = examples["edits"][example_idx]
+
+        corrected_text = inputs[example_idx][start_idx:end_idx]
 
         for start, end, correction in reversed(
             list(zip(edits["start"], edits["end"], edits["text"]))
@@ -48,27 +59,46 @@ def preprocess_baseline_transformer(dataset):
                 continue
             start_offset = start - start_idx
             end_offset = end - start_idx
-            if correction is None:
+            if correction == None:
                 correction = tokenizer.unk_token
             corrected_text = (
                 corrected_text[:start_offset] + correction + corrected_text[end_offset:]
             )
+        
         labels_out.append(corrected_text)
 
-    labels_out = tokenizer(labels_out, max_length=512, truncation=True)
-    model_inputs["labels"] = labels_out["input_ids"]
-    return model_inputs
-
+    prompts = [get_prompt(text, tokenizer) for text in examples['text']]
+    return {'prompts': prompts, 'labels': labels_out, 'inputs': examples['text']}
 
 def run_pipeline_and_evaluate():
     raw_dataset = process_split("wi_locness", "wi")
 
-    model_path = "AY2324S2-CS4248-Team-47/GEC-Baseline-Transformer"
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
+    model_path = (
+        # "AY2324S2-CS4248-Team-47/StableLM-WI_Locness"
+        "AY2324S2-CS4248-Team-47/Phi2-WI_Locness"
+    )
+
+    config = PeftConfig.from_pretrained(model_path)
+    model = AutoModelForCausalLM.from_pretrained(
+        config.base_model_name_or_path,
+        load_in_8bit=True,
+        attn_implementation="flash_attention_2",
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.base_model_name_or_path, use_fast=True
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]", "unk_token": "[UNK]"})
+        model.resize_token_embeddings(len(tokenizer))
+        
+    tokenizer.padding_side = "left"
+    model = PeftModel.from_pretrained(model, model_path)
+    model = model.merge_and_unload(safe_merge=True)
+
+    print(tokenizer.all_special_tokens)
 
     pipe = pipeline(
-        "text2text-generation",
+        "text-generation",
         model=model,
         tokenizer=tokenizer,
         device_map="auto",
@@ -76,27 +106,25 @@ def run_pipeline_and_evaluate():
     )
 
     print(f"model loaded: {model_path}")
-    remove_columns = [
-        col for col in raw_dataset["train"].column_names if col not in ("cefr", "id")
-    ]
-
+    remove_columns = [col for col in raw_dataset["train"].column_names if col not in ('cefr', 'id')]
+    
     test_dataset = raw_dataset.map(
-        preprocess_baseline_transformer,
+        preprocess_pretrained_model,
         batched=True,
         remove_columns=remove_columns,
     )["test"]
 
     # test_dataset = test_dataset[:2]
 
-    test_inputs = tokenizer.batch_decode(test_dataset["input_ids"])
-    predictions = pipe(test_inputs, do_sample=True, max_new_tokens=512, batch_size=32)
-
-    predictions = [pred["generated_text"] for pred in predictions]
-
-    test_references = tokenizer.batch_decode(test_dataset["labels"])
+    test_prompts = test_dataset["prompts"]
+    test_inputs = test_dataset["inputs"]
+    test_references = test_dataset["labels"]
     nested_test_references = [[ref] for ref in test_references]
     test_ids = test_dataset["id"]
     test_cefr = test_dataset["cefr"]
+
+    predictions = pipe(test_prompts, do_sample=True, max_length=1024, num_return_sequences=1, return_full_text=False, clean_up_tokenization_spaces=True)
+    predictions = [pred[0]['generated_text'] for pred in predictions]
 
     print("Preds and refs ready!")
 
@@ -116,22 +144,22 @@ def run_pipeline_and_evaluate():
     print(rouge_score)
     print(bert_score)
 
-    print(f"\nInput text: \n{test_inputs[1]}\n")
-    print(f"Reference corrected text: \n{test_references[1]}\n")
-    print(f"Model output: \n{predictions[1]}\n")
+    print(f"\nInput text: \n{test_inputs[0]}\n")
+    print(f"Reference corrected text: \n{test_references[0]}\n")
+    print(f"Model output: \n{predictions[0]}\n")
 
     data = {
         "inputs": test_inputs,
         "predictions": predictions,
         "references": test_references,
         "ids": test_ids,
-        "cefr": test_cefr,
+        "cefr": test_cefr,  
     }
-    with open("baseline_transformer_data.json", "w") as f:
+    with open("phi2_base_data.json", "w") as f:
         json.dump(data, f)
 
     metrics = {"bleu": bleu_score, "rouge": rouge_score, "bertscore": bert_score}
-    with open("baseline_transformer_metrics.txt", "w") as f:
+    with open("phi2_base_metrics.txt", "w") as f:
         f.write(json.dumps(metrics))
 
 
