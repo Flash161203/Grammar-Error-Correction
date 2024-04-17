@@ -161,6 +161,7 @@ if __name__ == "__main__":
     # Training
     ###############
     os.environ["WANDB_MODE"] = "offline"
+    os.environ["WANDB_LOG_MODEL"] = "end"
     os.environ["WANDB_ENTITY"] = "ay2324s2-cs4248-team-47"
     os.environ["WANDB_PROJECT"] = "dpo"
     with init_context:
