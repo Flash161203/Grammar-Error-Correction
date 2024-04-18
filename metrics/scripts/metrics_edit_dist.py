@@ -25,7 +25,7 @@ for predfile in json_file_list:
   # get Levenshtein edit distance between each pair
   distances = []
   for input_text, prediction in zip(inputs, predictions):
-      distance = editdistance.eval(input_text, prediction)
+      distance = editdistance.eval(input_text, prediction)/len(input_text)
       distances.append(distance)
 
   average_distance = sum(distances) / len(distances)
@@ -63,7 +63,7 @@ for predfile in json_file_list:
       distances = []
 
       for input_text, prediction in zip(inputs, predictions):
-          distance = editdistance.eval(input_text, prediction)
+          distance = editdistance.eval(input_text, prediction)/len(input_text)
           distances.append(distance)
       average_distance = sum(distances) / len(distances)
       metrics[cefr] = {"average_edit_dist": average_distance, "edit_dists" : distances}
